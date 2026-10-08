@@ -21,8 +21,8 @@ class ProductCatalog(Protocol):
 
 
 class HttpProductCatalog:
-    def __init__(self, base_url: str) -> None:
-        self._client = httpx2.Client(base_url=base_url, timeout=2.0)
+    def __init__(self, base_url: str, transport: httpx2.BaseTransport | None = None) -> None:
+        self._client = httpx2.Client(base_url=base_url, timeout=2.0, transport=transport)
 
     def get_product(self, sku: str) -> Product:
         response = self._client.get(f"/products/{sku}")

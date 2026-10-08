@@ -26,5 +26,5 @@ The tests need neither Kafka nor inventory-service. They use an in-memory publis
 
 ## Known limitations
 
-* The event is published after the database commit. If the process dies in between, the order exists and nobody hears about it. The outbox pattern fixes this.
+* The event is published after the database commit. If publishing fails or the process dies in between, the order exists and nobody hears about it. A failed publish makes `POST /orders` answer 500. The outbox pattern fixes this.
 * Run one worker at a time.
