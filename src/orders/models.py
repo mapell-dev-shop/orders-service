@@ -11,6 +11,7 @@ class OrderStatus(StrEnum):
     PENDING = "PENDING"
     CONFIRMED = "CONFIRMED"
     REJECTED = "REJECTED"
+    CANCELLED = "CANCELLED"
 
 
 class Order(Base):
