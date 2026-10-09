@@ -23,6 +23,7 @@ The tests need neither Kafka nor inventory-service. They use an in-memory publis
 
 * Publishes `OrderPlaced`.
 * Consumes `StockRejected` and `PaymentFailed`, and marks the order `REJECTED`.
+* Consumes `PaymentCaptured` and marks a `PENDING` order `CONFIRMED`.
 
 ## Known limitations
 

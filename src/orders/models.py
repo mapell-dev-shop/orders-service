@@ -9,6 +9,7 @@ from orders.db import Base
 
 class OrderStatus(StrEnum):
     PENDING = "PENDING"
+    CONFIRMED = "CONFIRMED"
     REJECTED = "REJECTED"
 
 
