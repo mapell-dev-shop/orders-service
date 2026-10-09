@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "orders-db": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "mcp-alchemy==2026.10.6.103105",
+        "mcp-alchemy"
+      ],
+      "env": {
+        "DB_URL": "sqlite:///file:orders.db?mode=ro&uri=true"
+      }
+    }
+  }
+}
