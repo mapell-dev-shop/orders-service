@@ -1,10 +1,11 @@
 import httpx2
+import pytest
 from fastapi.testclient import TestClient
 from shop_contracts.messaging import InMemoryEventPublisher
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from orders.models import Order
+from orders.models import Order, OrderStatus
 from tests.conftest import FakeCatalog
 
 TWO_BOOKS_ONE_PEN = {"lines": [{"sku": "BOOK-1", "quantity": 2}, {"sku": "PEN-1", "quantity": 1}]}
@@ -91,3 +92,94 @@ def test_an_order_can_be_read_back(client: TestClient) -> None:
 
 def test_reading_a_missing_order_gives_404(client: TestClient) -> None:
     assert client.get("/orders/does-not-exist").status_code == 404
+
+
+def place(client: TestClient) -> dict[str, object]:
+    response = client.post("/orders", json=TWO_BOOKS_ONE_PEN)
+    assert response.status_code == 201
+    body: dict[str, object] = response.json()
+    return body
+
+
+def set_status_elsewhere(session: Session, order_id: str, status: str, reason: str | None) -> None:
+    """Commit a status from a session of its own, as the worker would.
+
+    The client's session keeps its PENDING copy of the order, so this also checks that
+    the endpoint does not decide from a stale copy.
+    """
+    with Session(session.get_bind()) as worker:
+        worker.execute(
+            update(Order).where(Order.id == order_id).values(status=status, status_reason=reason)
+        )
+        worker.commit()
+
+
+def test_cancelling_a_pending_order(client: TestClient) -> None:
+    placed = place(client)
+
+    response = client.post(f"/orders/{placed['id']}/cancel")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "CANCELLED"
+    assert body["status_reason"] == "cancelled by customer"
+    assert body["total_cents"] == placed["total_cents"]
+    assert body["lines"] == placed["lines"]
+    assert client.get(f"/orders/{placed['id']}").json() == body
+
+
+def test_cancelling_twice_returns_the_same_order(client: TestClient) -> None:
+    order_id = place(client)["id"]
+
+    first = client.post(f"/orders/{order_id}/cancel")
+    second = client.post(f"/orders/{order_id}/cancel")
+
+    assert first.status_code == second.status_code == 200
+    assert second.json() == first.json()
+
+
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [(OrderStatus.CONFIRMED, None), (OrderStatus.REJECTED, "insufficient stock: BOOK-1")],
+)
+def test_cancelling_an_order_that_is_no_longer_pending_is_refused(
+    client: TestClient, session: Session, status: OrderStatus, reason: str | None
+) -> None:
+    order_id = str(place(client)["id"])
+    set_status_elsewhere(session, order_id, status, reason)
+
+    response = client.post(f"/orders/{order_id}/cancel")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == f"order is {status} and can no longer be cancelled"
+    after = client.get(f"/orders/{order_id}").json()
+    assert after["status"] == status
+    assert after["status_reason"] == reason
+
+
+def test_cancelling_a_missing_order_gives_404(client: TestClient) -> None:
+    response = client.post("/orders/does-not-exist/cancel")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "order not found"
+
+
+def test_cancelling_publishes_nothing(
+    client: TestClient, publisher: InMemoryEventPublisher
+) -> None:
+    order_id = place(client)["id"]
+
+    client.post(f"/orders/{order_id}/cancel")
+
+    assert [envelope["type"] for envelope in publisher.published] == ["OrderPlaced"]
+
+
+def test_cancelling_does_not_need_inventory(client: TestClient, catalog: FakeCatalog) -> None:
+    order_id = place(client)["id"]
+    catalog.error = httpx2.ConnectError("connection refused")
+    catalog.requested.clear()
+
+    response = client.post(f"/orders/{order_id}/cancel")
+
+    assert response.status_code == 200
+    assert catalog.requested == []
