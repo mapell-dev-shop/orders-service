@@ -406,9 +406,7 @@ def place(client: TestClient) -> dict[str, object]:
     return body
 
 
-def set_status_elsewhere(
-    session: Session, order_id: str, status: str, reason: str | None
-) -> None:
+def set_status_elsewhere(session: Session, order_id: str, status: str, reason: str | None) -> None:
     """Commit a status from a session of its own, as the worker would.
 
     The client's session keeps its PENDING copy of the order, so this also checks that
@@ -416,9 +414,7 @@ def set_status_elsewhere(
     """
     with Session(session.get_bind()) as worker:
         worker.execute(
-            update(Order)
-            .where(Order.id == order_id)
-            .values(status=status, status_reason=reason)
+            update(Order).where(Order.id == order_id).values(status=status, status_reason=reason)
         )
         worker.commit()
 
