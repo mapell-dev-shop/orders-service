@@ -22,8 +22,9 @@ The tests need neither Kafka nor inventory-service. They use an in-memory publis
 ## Events
 
 * Publishes `OrderPlaced`.
-* Consumes `StockRejected` and `PaymentFailed`, and marks the order `REJECTED`.
+* Consumes `StockRejected` and `PaymentFailed`, and marks a `PENDING` order `REJECTED`.
 * Consumes `PaymentCaptured` and marks a `PENDING` order `CONFIRMED`.
+* `POST /orders/{id}/cancel` moves a `PENDING` order to `CANCELLED`. Events never move a `CANCELLED` order. See Known limitations before relying on it.
 
 ## Known limitations
 

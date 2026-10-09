@@ -169,8 +169,9 @@ def test_cancelling_publishes_nothing(
 ) -> None:
     order_id = place(client)["id"]
 
-    client.post(f"/orders/{order_id}/cancel")
+    response = client.post(f"/orders/{order_id}/cancel")
 
+    assert response.status_code == 200
     assert [envelope["type"] for envelope in publisher.published] == ["OrderPlaced"]
 
 
