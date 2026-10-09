@@ -86,6 +86,7 @@ def test_payment_captured_confirms_a_pending_order(session: Session) -> None:
 
     assert order.status == OrderStatus.CONFIRMED
     assert order.status_reason is None
+    assert order.confirmed_at is not None
 
 
 def test_a_redelivered_payment_captured_is_handled_once(session: Session) -> None:
@@ -107,3 +108,4 @@ def test_payment_captured_leaves_an_order_that_is_not_pending_alone(session: Ses
 
     assert order.status == OrderStatus.REJECTED
     assert order.status_reason == "insufficient stock: BOOK-1"
+    assert order.confirmed_at is None

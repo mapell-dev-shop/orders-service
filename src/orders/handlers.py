@@ -1,5 +1,6 @@
 """What orders-service does when an event arrives from another service."""
 
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -33,5 +34,6 @@ def handle_payment_captured(session: Session, envelope: dict[str, Any]) -> None:
     order = session.get(Order, envelope["data"]["order_id"])
     if order is not None and order.status == OrderStatus.PENDING:
         order.status = OrderStatus.CONFIRMED
+        order.confirmed_at = datetime.now(UTC)
     session.add(ProcessedEvent(event_id=envelope["event_id"]))
     session.commit()

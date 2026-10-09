@@ -21,6 +21,7 @@ class Order(Base):
     status_reason: Mapped[str | None] = mapped_column(String(200))
     total_cents: Mapped[int]
     created_at: Mapped[datetime]
+    confirmed_at: Mapped[datetime | None]
     lines: Mapped[list["OrderLine"]] = relationship(
         back_populates="order", cascade="all, delete-orphan"
     )
