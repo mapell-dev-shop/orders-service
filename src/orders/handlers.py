@@ -5,16 +5,14 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from orders.models import Order, OrderStatus, ProcessedEvent
+from orders.models import OrderStatus, ProcessedEvent
+from orders.status import move_pending
 
 
 def reject_order(session: Session, envelope: dict[str, Any], reason: str) -> None:
     if session.get(ProcessedEvent, envelope["event_id"]) is not None:
         return
-    order = session.get(Order, envelope["data"]["order_id"])
-    if order is not None and order.status == OrderStatus.PENDING:
-        order.status = OrderStatus.REJECTED
-        order.status_reason = reason
+    move_pending(session, envelope["data"]["order_id"], OrderStatus.REJECTED, reason=reason)
     session.add(ProcessedEvent(event_id=envelope["event_id"]))
     session.commit()
 
@@ -31,9 +29,11 @@ def handle_payment_failed(session: Session, envelope: dict[str, Any]) -> None:
 def handle_payment_captured(session: Session, envelope: dict[str, Any]) -> None:
     if session.get(ProcessedEvent, envelope["event_id"]) is not None:
         return
-    order = session.get(Order, envelope["data"]["order_id"])
-    if order is not None and order.status == OrderStatus.PENDING:
-        order.status = OrderStatus.CONFIRMED
-        order.confirmed_at = datetime.now(UTC)
+    move_pending(
+        session,
+        envelope["data"]["order_id"],
+        OrderStatus.CONFIRMED,
+        confirmed_at=datetime.now(UTC),
+    )
     session.add(ProcessedEvent(event_id=envelope["event_id"]))
     session.commit()
