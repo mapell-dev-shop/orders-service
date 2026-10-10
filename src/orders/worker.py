@@ -11,6 +11,7 @@ from orders.db import SessionLocal
 from orders.handlers import (
     handle_payment_captured,
     handle_payment_failed,
+    handle_payment_refunded,
     handle_stock_rejected,
 )
 
@@ -31,6 +32,7 @@ def main() -> None:
             "StockRejected": with_session(handle_stock_rejected),
             "PaymentFailed": with_session(handle_payment_failed),
             "PaymentCaptured": with_session(handle_payment_captured),
+            "PaymentRefunded": with_session(handle_payment_refunded),
         },
     )
 

@@ -6,7 +6,12 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from orders.handlers import handle_payment_captured, handle_payment_failed, handle_stock_rejected
+from orders.handlers import (
+    handle_payment_captured,
+    handle_payment_failed,
+    handle_payment_refunded,
+    handle_stock_rejected,
+)
 from orders.models import Order, OrderStatus, ProcessedEvent
 from orders.status import move_order
 from tests.conftest import event
@@ -169,3 +174,49 @@ def test_payment_captured_does_not_overwrite_a_cancel_committed_after_the_order_
         stored = fresh.get(Order, "o-1")
         assert stored is not None
         assert stored.status == OrderStatus.CANCELLED
+
+
+def payment_refunded(order_id: str = "o-1") -> dict[str, object]:
+    return event(
+        "PaymentRefunded", {"order_id": order_id, "payment_id": "p-1", "amount_cents": 5000}
+    )
+
+
+def test_a_refund_is_recorded_on_the_cancelled_order(session: Session) -> None:
+    order = cancelled_order(session)
+
+    handle_payment_refunded(session, payment_refunded())
+
+    assert order.refunded_at is not None
+    assert order.status == OrderStatus.CANCELLED
+    assert order.status_reason == "cancelled by customer"
+
+
+def test_a_redelivered_refund_is_handled_once(session: Session) -> None:
+    cancelled_order(session)
+    envelope = payment_refunded()
+
+    handle_payment_refunded(session, envelope)
+    handle_payment_refunded(session, envelope)
+
+    assert session.scalar(select(func.count()).select_from(ProcessedEvent)) == 1
+
+
+def test_a_repeated_refund_keeps_the_first_time(session: Session) -> None:
+    order = cancelled_order(session)
+    handle_payment_refunded(session, payment_refunded())
+    first = order.refunded_at
+
+    handle_payment_refunded(session, payment_refunded())
+
+    assert order.refunded_at == first
+    assert session.scalar(select(func.count()).select_from(ProcessedEvent)) == 2
+
+
+def test_a_refund_for_an_unknown_order_is_recorded_and_ignored(session: Session) -> None:
+    envelope = payment_refunded("missing")
+
+    handle_payment_refunded(session, envelope)
+
+    assert session.get(Order, "missing") is None
+    assert session.get(ProcessedEvent, envelope["event_id"]) is not None

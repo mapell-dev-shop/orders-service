@@ -40,6 +40,7 @@ class OrderOut(BaseModel):
     status_reason: str | None
     total_cents: int
     lines: list[LineOut]
+    refunded_at: datetime | None
 
 
 @cache
@@ -61,6 +62,7 @@ def to_out(order: Order) -> OrderOut:
         status=order.status,
         status_reason=order.status_reason,
         total_cents=order.total_cents,
+        refunded_at=order.refunded_at,
         lines=[
             LineOut(sku=line.sku, quantity=line.quantity, unit_price_cents=line.unit_price_cents)
             for line in order.lines

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 
 import httpx2
@@ -251,3 +252,19 @@ def test_cancelling_does_not_need_inventory(client: TestClient, catalog: FakeCat
 
     assert response.status_code == 200
     assert catalog.requested == []
+
+
+def test_an_order_shows_when_its_refund_came_back(client: TestClient, session: Session) -> None:
+    order_id = str(place(client)["id"])
+    assert client.get(f"/orders/{order_id}").json()["refunded_at"] is None
+
+    client.post(f"/orders/{order_id}/cancel")
+    with Session(session.get_bind()) as worker:
+        worker.execute(
+            update(Order)
+            .where(Order.id == order_id)
+            .values(refunded_at=datetime(2026, 10, 10, 12, 0))
+        )
+        worker.commit()
+
+    assert client.get(f"/orders/{order_id}").json()["refunded_at"] == "2026-10-10T12:00:00"
