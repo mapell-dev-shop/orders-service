@@ -30,6 +30,7 @@ The tests need neither Kafka nor inventory-service. They use an in-memory publis
 
 ## Known limitations
 
-* `OrderPlaced` and `OrderCancelled` are published after the database commit. If publishing fails or the process dies in between, the order exists and nobody hears about it. A failed publish makes `POST /orders` answer 500. A failed cancel answers 500 with the order already `CANCELLED`. If `OrderCancelled` is lost, cancelling the order again publishes it again. The outbox pattern fixes this. The design of cancelling is in `../docs/superpowers/specs/2026-10-10-cancel-order-compensation-design.md` in the shop workspace.
+* `OrderPlaced` and `OrderCancelled` are published after the database commit. If publishing fails or the process dies in between, a lost `OrderPlaced` leaves a `PENDING` order nobody else hears about, and a lost `OrderCancelled` leaves stock reserved and money captured until the customer cancels again, which publishes it again. A failed publish makes `POST /orders` answer 500. A failed cancel answers 500 with the order already `CANCELLED`. The outbox pattern fixes this. The design of cancelling is in `../docs/superpowers/specs/2026-10-10-cancel-order-compensation-design.md` in the shop workspace.
 * Run one worker at a time.
 * There is no authentication. Anyone who knows an order id can read or cancel the order.
+* Out of scope for cancelling: cancelling part of an order, failing refunds, inventory overselling under concurrent reservations, and a cutoff after which an order can no longer be cancelled (authentication on cancel is covered above).
