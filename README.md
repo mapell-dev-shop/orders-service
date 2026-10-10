@@ -22,13 +22,13 @@ The tests need neither Kafka nor inventory-service. They use an in-memory publis
 ## Events
 
 * Publishes `OrderPlaced`.
+* Publishes `OrderCancelled` when an order is cancelled.
 * Consumes `StockRejected` and `PaymentFailed`, and marks a `PENDING` order `REJECTED`.
 * Consumes `PaymentCaptured` and marks a `PENDING` order `CONFIRMED`.
-* `POST /orders/{id}/cancel` moves a `PENDING` order to `CANCELLED`. Events never move a `CANCELLED` order. See Known limitations before relying on it.
+* `POST /orders/{id}/cancel` moves a `PENDING` or `CONFIRMED` order to `CANCELLED` and publishes `OrderCancelled`, so inventory gives the stock back and payments refunds the money. Cancelling a `CANCELLED` order publishes it again. A `REJECTED` order cannot be cancelled (409). Events never move a `CANCELLED` order. See Known limitations before relying on it.
 
 ## Known limitations
 
-* The event is published after the database commit. If publishing fails or the process dies in between, the order exists and nobody hears about it. A failed publish makes `POST /orders` answer 500. The outbox pattern fixes this.
+* `OrderPlaced` and `OrderCancelled` are published after the database commit. If publishing fails or the process dies in between, the order exists and nobody hears about it. A failed publish makes `POST /orders` answer 500. A failed cancel answers 500 with the order already `CANCELLED`, and cancelling it again publishes `OrderCancelled` again. If `OrderCancelled` is lost, cancelling the order again publishes it again. The outbox pattern fixes this. The design of cancelling is in `../docs/superpowers/specs/2026-10-10-cancel-order-compensation-design.md` in the shop workspace.
 * Run one worker at a time.
-* `POST /orders/{id}/cancel` cancels a `PENDING` order in orders-service only. Inventory and payments are not told, so the order flow carries on: the stock stays reserved (unless the payment later fails), and the payment is usually captured. The order stays `CANCELLED` and the customer is charged, with no refund. Cancelling is therefore not offered to customers until inventory and payments learn about it. The design for that is in `docs/superpowers/specs/2026-10-09-cancel-pending-order-design.md`.
 * There is no authentication. Anyone who knows an order id can read or cancel the order.

@@ -14,7 +14,7 @@ from orders import settings
 from orders.catalog import HttpProductCatalog, ProductCatalog, ProductNotFound
 from orders.db import get_session
 from orders.models import Order, OrderLine, OrderStatus
-from orders.status import move_pending
+from orders.status import move_order
 
 app = FastAPI(title="orders-service")
 
@@ -128,13 +128,28 @@ def get_order(order_id: str, session: SessionDep) -> OrderOut:
 
 
 @app.post("/orders/{order_id}/cancel")
-def cancel_order(order_id: str, session: SessionDep) -> OrderOut:
-    """Cancel a PENDING order. Only orders-service hears of it (README, Known limitations)."""
-    moved = move_pending(session, order_id, OrderStatus.CANCELLED, reason="cancelled by customer")
+def cancel_order(
+    order_id: str,
+    session: SessionDep,
+    publisher: Annotated[EventPublisher, Depends(get_publisher)],
+) -> OrderOut:
+    """Cancel a PENDING or CONFIRMED order, and tell inventory and payments.
+
+    Cancelling a CANCELLED order publishes OrderCancelled again. That repairs an event lost
+    between the commit and the publish, and inventory and payments ignore the repeat.
+    """
+    moved = move_order(
+        session,
+        order_id,
+        OrderStatus.CANCELLED,
+        from_statuses=(OrderStatus.PENDING, OrderStatus.CONFIRMED),
+        reason="cancelled by customer",
+    )
     session.commit()
     order = session.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "order not found")
     if not moved and order.status != OrderStatus.CANCELLED:
         raise HTTPException(409, f"order is {order.status} and can no longer be cancelled")
+    publisher.publish(new_envelope("OrderCancelled", {"order_id": order.id}), key=order.id)
     return to_out(order)

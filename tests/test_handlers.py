@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from orders.handlers import handle_payment_captured, handle_payment_failed, handle_stock_rejected
 from orders.models import Order, OrderStatus, ProcessedEvent
-from orders.status import move_pending
+from orders.status import move_order
 from tests.conftest import event
 
 
@@ -158,9 +158,7 @@ def test_payment_captured_does_not_overwrite_a_cancel_committed_after_the_order_
     order = pending_order(session)
     assert order.status == OrderStatus.PENDING  # the worker's session now holds a PENDING copy
     with Session(session.get_bind()) as api_session:
-        assert move_pending(
-            api_session, "o-1", OrderStatus.CANCELLED, reason="cancelled by customer"
-        )
+        assert move_order(api_session, "o-1", OrderStatus.CANCELLED, reason="cancelled by customer")
         api_session.commit()
 
     handle_payment_captured(session, payment_captured())

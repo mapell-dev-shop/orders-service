@@ -15,8 +15,8 @@ The full flow runs from the workspace root: `./up.sh`, `./run-all.sh`, then `uv 
 
 * Never read inventory-service's or payments-service's database. Prices come from `GET /products/{sku}` on inventory-service, and everything else comes from events.
 * Every handler is idempotent. It returns early if `envelope["event_id"]` is already in `processed_events`, and adds the id in the same commit as the state change.
-* Events only move a `PENDING` order. A late or duplicate event must never change a `CONFIRMED` or `REJECTED` order.
-* `OrderPlaced` is published after the commit, and there is no outbox yet. Don't paper over this with retries or try/except. It is a documented limitation (README).
+* Events only move a `PENDING` order. A late or duplicate event must never change the status of a `CONFIRMED`, `REJECTED` or `CANCELLED` order. Every status change goes through `move_order()`.
+* `OrderPlaced` and `OrderCancelled` are published after the commit, and there is no outbox yet. Don't paper over this with retries or try/except. It is a documented limitation (README).
 * Run only one worker at a time.
 
 ## Topics and event schemas

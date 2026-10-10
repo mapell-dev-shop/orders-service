@@ -1,10 +1,13 @@
+from typing import Any
+
 import httpx2
 import pytest
 from fastapi.testclient import TestClient
-from shop_contracts.messaging import InMemoryEventPublisher
+from shop_contracts.messaging import EventNotDelivered, InMemoryEventPublisher
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
+from orders.api import app, get_publisher
 from orders.models import Order, OrderStatus
 from tests.conftest import FakeCatalog
 
@@ -138,23 +141,67 @@ def test_cancelling_twice_returns_the_same_order(client: TestClient) -> None:
     assert second.json() == first.json()
 
 
-@pytest.mark.parametrize(
-    ("status", "reason"),
-    [(OrderStatus.CONFIRMED, None), (OrderStatus.REJECTED, "insufficient stock: BOOK-1")],
-)
-def test_cancelling_an_order_that_is_no_longer_pending_is_refused(
-    client: TestClient, session: Session, status: OrderStatus, reason: str | None
+def cancels(publisher: InMemoryEventPublisher) -> list[dict[str, Any]]:
+    return [e["data"] for e in publisher.published if e["type"] == "OrderCancelled"]
+
+
+def test_cancelling_a_rejected_order_is_refused(
+    client: TestClient, session: Session, publisher: InMemoryEventPublisher
 ) -> None:
     order_id = str(place(client)["id"])
-    set_status_elsewhere(session, order_id, status, reason)
+    set_status_elsewhere(session, order_id, OrderStatus.REJECTED, "insufficient stock: BOOK-1")
 
     response = client.post(f"/orders/{order_id}/cancel")
 
     assert response.status_code == 409
-    assert response.json()["detail"] == f"order is {status} and can no longer be cancelled"
+    assert response.json()["detail"] == "order is REJECTED and can no longer be cancelled"
     after = client.get(f"/orders/{order_id}").json()
-    assert after["status"] == status
-    assert after["status_reason"] == reason
+    assert after["status"] == "REJECTED"
+    assert after["status_reason"] == "insufficient stock: BOOK-1"
+    assert cancels(publisher) == []
+
+
+def test_cancelling_a_confirmed_order(
+    client: TestClient, session: Session, publisher: InMemoryEventPublisher
+) -> None:
+    order_id = str(place(client)["id"])
+    set_status_elsewhere(session, order_id, OrderStatus.CONFIRMED, None)
+
+    response = client.post(f"/orders/{order_id}/cancel")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "CANCELLED"
+    assert response.json()["status_reason"] == "cancelled by customer"
+    assert cancels(publisher) == [{"order_id": order_id}]
+
+
+def test_cancelling_a_pending_order_tells_the_shop(
+    client: TestClient, publisher: InMemoryEventPublisher
+) -> None:
+    order_id = place(client)["id"]
+
+    client.post(f"/orders/{order_id}/cancel")
+
+    assert cancels(publisher) == [{"order_id": order_id}]
+
+
+def test_cancelling_again_tells_the_shop_again(
+    client: TestClient, publisher: InMemoryEventPublisher
+) -> None:
+    order_id = place(client)["id"]
+
+    client.post(f"/orders/{order_id}/cancel")
+    client.post(f"/orders/{order_id}/cancel")
+
+    assert cancels(publisher) == [{"order_id": order_id}, {"order_id": order_id}]
+
+
+def test_cancelling_a_missing_order_tells_nobody(
+    client: TestClient, publisher: InMemoryEventPublisher
+) -> None:
+    client.post("/orders/does-not-exist/cancel")
+
+    assert cancels(publisher) == []
 
 
 def test_cancelling_a_missing_order_gives_404(client: TestClient) -> None:
@@ -164,15 +211,35 @@ def test_cancelling_a_missing_order_gives_404(client: TestClient) -> None:
     assert response.json()["detail"] == "order not found"
 
 
-def test_cancelling_publishes_nothing(
-    client: TestClient, publisher: InMemoryEventPublisher
+class RefusingPublisher:
+    """Kafka refuses every event until refuse is set to False."""
+
+    def __init__(self) -> None:
+        self.refuse = True
+        self.published: list[dict[str, Any]] = []
+
+    def publish(self, envelope: dict[str, Any], key: str) -> None:
+        if self.refuse:
+            raise EventNotDelivered("Kafka did not confirm")
+        self.published.append(envelope)
+
+
+def test_a_cancel_whose_event_was_lost_is_repaired_by_cancelling_again(
+    client: TestClient,
 ) -> None:
     order_id = place(client)["id"]
+    kafka = RefusingPublisher()
+    app.dependency_overrides[get_publisher] = lambda: kafka
 
+    with pytest.raises(EventNotDelivered):
+        client.post(f"/orders/{order_id}/cancel")
+    assert client.get(f"/orders/{order_id}").json()["status"] == "CANCELLED"
+
+    kafka.refuse = False
     response = client.post(f"/orders/{order_id}/cancel")
 
     assert response.status_code == 200
-    assert [envelope["type"] for envelope in publisher.published] == ["OrderPlaced"]
+    assert [e["type"] for e in kafka.published] == ["OrderCancelled"]
 
 
 def test_cancelling_does_not_need_inventory(client: TestClient, catalog: FakeCatalog) -> None:

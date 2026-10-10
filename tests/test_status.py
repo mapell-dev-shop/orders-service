@@ -8,14 +8,14 @@ from sqlalchemy.orm import Session
 
 from orders.db import Base
 from orders.models import Order, OrderStatus
-from orders.status import move_pending
+from orders.status import move_order
 from tests.test_handlers import pending_order
 
 
 def test_a_pending_order_moves(session: Session) -> None:
     order = pending_order(session)
 
-    assert move_pending(session, "o-1", OrderStatus.REJECTED, reason="insufficient stock")
+    assert move_order(session, "o-1", OrderStatus.REJECTED, reason="insufficient stock")
     session.commit()
 
     assert order.status == OrderStatus.REJECTED
@@ -26,7 +26,7 @@ def test_extra_fields_are_set_with_the_move(session: Session) -> None:
     order = pending_order(session)
     confirmed_at = datetime(2026, 10, 9, 12, 0)
 
-    assert move_pending(session, "o-1", OrderStatus.CONFIRMED, confirmed_at=confirmed_at)
+    assert move_order(session, "o-1", OrderStatus.CONFIRMED, confirmed_at=confirmed_at)
     session.commit()
 
     assert order.status == OrderStatus.CONFIRMED
@@ -43,7 +43,7 @@ def test_an_order_that_is_not_pending_does_not_move(session: Session, status: Or
     order.status_reason = "earlier"
     session.commit()
 
-    assert not move_pending(session, "o-1", OrderStatus.CANCELLED, reason="later")
+    assert not move_order(session, "o-1", OrderStatus.CANCELLED, reason="later")
     session.commit()
 
     assert order.status == status
@@ -51,7 +51,7 @@ def test_an_order_that_is_not_pending_does_not_move(session: Session, status: Or
 
 
 def test_an_unknown_order_does_not_move(session: Session) -> None:
-    assert not move_pending(session, "missing", OrderStatus.CANCELLED)
+    assert not move_order(session, "missing", OrderStatus.CANCELLED)
 
 
 @pytest.fixture
@@ -68,12 +68,10 @@ def test_a_stale_copy_in_the_session_does_not_decide(file_engine: Engine) -> Non
         stale = pending_order(worker)
         assert stale.status == OrderStatus.PENDING  # the worker now holds a PENDING copy
 
-        assert move_pending(api, "o-1", OrderStatus.CANCELLED, reason="cancelled by customer")
+        assert move_order(api, "o-1", OrderStatus.CANCELLED, reason="cancelled by customer")
         api.commit()
 
-        assert not move_pending(
-            worker, "o-1", OrderStatus.CONFIRMED, confirmed_at=datetime.now(UTC)
-        )
+        assert not move_order(worker, "o-1", OrderStatus.CONFIRMED, confirmed_at=datetime.now(UTC))
         assert stale.status == OrderStatus.CANCELLED
         assert worker.get(Order, "o-1") is stale
         worker.commit()
@@ -84,3 +82,37 @@ def test_a_stale_copy_in_the_session_does_not_decide(file_engine: Engine) -> Non
         assert stored.status == OrderStatus.CANCELLED
         assert stored.status_reason == "cancelled by customer"
         assert stored.confirmed_at is None
+
+
+def test_a_confirmed_order_moves_when_confirmed_is_allowed(session: Session) -> None:
+    order = pending_order(session)
+    order.status = OrderStatus.CONFIRMED
+    session.commit()
+
+    assert move_order(
+        session,
+        "o-1",
+        OrderStatus.CANCELLED,
+        from_statuses=(OrderStatus.PENDING, OrderStatus.CONFIRMED),
+        reason="cancelled by customer",
+    )
+    session.commit()
+
+    assert order.status == OrderStatus.CANCELLED
+    assert order.status_reason == "cancelled by customer"
+
+
+def test_a_rejected_order_does_not_move_even_when_confirmed_is_allowed(session: Session) -> None:
+    order = pending_order(session)
+    order.status = OrderStatus.REJECTED
+    session.commit()
+
+    assert not move_order(
+        session,
+        "o-1",
+        OrderStatus.CANCELLED,
+        from_statuses=(OrderStatus.PENDING, OrderStatus.CONFIRMED),
+    )
+    session.commit()
+
+    assert order.status == OrderStatus.REJECTED
