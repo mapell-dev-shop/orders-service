@@ -1,0 +1,44 @@
+name: Claude Code review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Review with Claude Code
+        uses: anthropics/claude-code-action@v1.0.248
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The Claude GitHub App is not installed, so the action uses the job's token.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          use_sticky_comment: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request against the rules in CLAUDE.md. Look for:
+            - correctness bugs and missing error handling
+            - handlers that are not idempotent, or status changes that bypass move_order()
+            - model changes without a matching Alembic revision
+            - hard-coded topic names or event payload shapes instead of shop_contracts
+            - missing or weak tests
+
+            Use inline comments for specific lines and one top-level comment for the summary.
+            Only report problems; skip praise.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
